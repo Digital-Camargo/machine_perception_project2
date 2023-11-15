@@ -2,6 +2,10 @@ import torch
 import torch.nn as nn
 import torchvision
 import torchvision.transforms as transforms
+import matplotlib as plt
+import seaborn as sns
+from sklearn.metrics import confusion_matrix, precision_recall_curve
+import numpy as np
 
 # Enable anomaly detection to find the operations that failed to compute their gradient
 torch.autograd.set_detect_anomaly(True)
@@ -77,6 +81,9 @@ optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
 # Train the model
 total_step = len(train_loader)
+# Initialize a list to store the loss values
+loss_values = []
+
 for epoch in range(num_epochs):
     for i, (images, labels) in enumerate(train_loader):
         # Move tensors to the configured device
@@ -86,6 +93,9 @@ for epoch in range(num_epochs):
         # Forward pass
         outputs = model(images)
         loss = criterion(outputs, labels)
+
+        # Record the loss value
+        loss_values.append(loss.item())
         
         # Backward and optimize
         optimizer.zero_grad()
@@ -95,6 +105,26 @@ for epoch in range(num_epochs):
         if (i+1) % 100 == 0:
             print ('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}'
                    .format(epoch+1, num_epochs, i+1, total_step, loss.item()))
+            
+
+# Save the trained model after the training loop
+torch.save(model.state_dict(), 'alexnet_cifar10_model.pth')
+
+
+# After training, plot the loss values
+plt.figure(figsize=(10, 5))
+plt.plot(loss_values, label='Training Loss')
+plt.title('Loss as a Function of Training Steps')
+plt.xlabel('Training Steps')
+plt.ylabel('Loss')
+plt.legend()
+plt.show()
+
+
+# Load the model for evaluation
+model = AlexNet(num_classes=10)  # Re-create the model structure
+model.load_state_dict(torch.load('alexnet_cifar10_model.pth'))
+model.to(device)
 
 # Test the model
 model.eval()
@@ -110,3 +140,56 @@ with torch.no_grad():
         correct += (predicted == labels).sum().item()
 
 print('Test Accuracy of the model on the 10000 test images: {} %'.format(100 * correct / total))
+
+
+# After testing the model, create confusion matrix
+all_labels = []
+all_predictions = []
+
+with torch.no_grad():
+    for images, labels in test_loader:
+        images = images.to(device)
+        labels = labels.to(device)
+        outputs = model(images)
+        _, predicted = torch.max(outputs.data, 1)
+        all_labels.extend(labels.cpu().numpy())
+        all_predictions.extend(predicted.cpu().numpy())
+
+cm = confusion_matrix(all_labels, all_predictions)
+plt.figure(figsize=(10, 8))
+sns.heatmap(cm, annot=True, fmt='d')
+plt.title('Confusion Matrix')
+plt.ylabel('Actual')
+plt.xlabel('Predicted')
+plt.show()
+
+
+
+# For Precision-Recall Curve, collect scores and actual labels
+all_scores = []
+
+with torch.no_grad():
+    for images, labels in test_loader:
+        images = images.to(device)
+        labels = labels.to(device)
+        outputs = model(images)
+        all_scores.extend(outputs.cpu().numpy())
+
+# Convert labels to one-hot encoding for multiclass precision-recall calculation
+all_labels_one_hot = np.eye(10)[all_labels]  # CIFAR-10 has 10 classes
+
+# Calculate precision and recall for each class
+precisions, recalls = {}, {}
+for i in range(10):
+    precisions[i], recalls[i], _ = precision_recall_curve(all_labels_one_hot[:, i], all_scores[:, i])
+
+# Plotting the precision-recall curve
+plt.figure(figsize=(12, 8))
+for i in range(10):
+    plt.plot(recalls[i], precisions[i], lw=2, label=f'Class {i}')
+plt.xlabel('Recall')
+plt.ylabel('Precision')
+plt.title('Precision-Recall Curve for Each Class')
+plt.legend()
+plt.show()
+
