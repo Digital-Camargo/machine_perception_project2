@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 import torch.nn as nn
 import torchvision
 import torchvision.transforms as transforms
@@ -49,54 +50,31 @@ class AlexNet(nn.Module):
         return x
     
     
-class Fire(nn.Module):
-    def __init__(self, in_channel, s1x1, e1x1, e3x3):
-        super(Fire, self).__init__()
-        self.squeeze = nn.Conv2d(in_channel, s1x1, kernel_size=1)
-        self.squeeze_activation = nn.ReLU(inplace=True)
-        self.expand1x1 = nn.Conv2d(s1x1, e1x1, kernel_size=1)
-        self.expand1x1_activation = nn.ReLU(inplace=True)
-        self.expand3x3 = nn.Conv2d(s1x1, e3x3, kernel_size=3, padding=1)
-        self.expand3x3_activation = nn.ReLU(inplace=True)
-
-    def forward(self, x):
-        x = self.squeeze_activation(self.squeeze(x))
-        return torch.cat([
-            self.expand1x1_activation(self.expand1x1(x)),
-            self.expand3x3_activation(self.expand3x3(x))
-        ], 1)
-
-class SqueezeNet(nn.Module):
+class BasicCNN(nn.Module):
     def __init__(self, num_classes=10):
-        super(SqueezeNet, self).__init__()
-        self.features = nn.Sequential(
-            nn.Conv2d(3, 96, kernel_size=3, stride=2),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=3, stride=2, ceil_mode=True),
-            Fire(96, 16, 64, 64),
-            Fire(128, 16, 64, 64),
-            nn.MaxPool2d(kernel_size=3, stride=2, ceil_mode=True),
-            Fire(128, 32, 128, 128),
-            Fire(256, 32, 128, 128),
-            nn.MaxPool2d(kernel_size=3, stride=2, ceil_mode=True),
-            Fire(256, 48, 192, 192),
-            Fire(384, 48, 192, 192),
-            Fire(384, 64, 256, 256),
-            Fire(512, 64, 256, 256),
-        )
-        # Final convolution is initialized differently form the rest
-        final_conv = nn.Conv2d(512, num_classes, kernel_size=1)
-        self.classifier = nn.Sequential(
-            nn.Dropout(p=0.5),
-            final_conv,
-            nn.ReLU(inplace=True),
-            nn.AdaptiveAvgPool2d((1, 1))
-        )
+        super(BasicCNN, self).__init__()
+        self.layer1 = nn.Sequential(
+            nn.Conv2d(3, 32, kernel_size=5, stride=1, padding=2),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2))
+        self.layer2 = nn.Sequential(
+            nn.Conv2d(32, 64, kernel_size=5, stride=1, padding=2),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2))
+        self.fc1 = nn.Linear(64 * 56 * 56, 1000)  # Adjusted to the correct size
+        self.fc2 = nn.Linear(1000, num_classes)
 
     def forward(self, x):
-        x = self.features(x)
-        x = self.classifier(x)
-        return x.view(x.size(0), -1)
+        out = self.layer1(x)
+        out = self.layer2(out)
+        out = out.view(out.size(0), -1)  # Flatten the output
+        out = F.relu(self.fc1(out))
+        out = self.fc2(out)
+        return out
+
+
     
 
     
@@ -142,9 +120,9 @@ def trainAlexNet(num_epochs, batch_size, learning_rate, train_loader):
     return loss_values
 
 
-
-def trainSqueezeNet(num_epochs, batch_size, learning_rate, train_loader):
-    model = SqueezeNet(num_classes=10).to(device)
+# Training function for BasicCNN
+def trainBasicCNN(num_epochs, batch_size, learning_rate, train_loader):
+    model = BasicCNN(num_classes=10).to(device)
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
@@ -177,7 +155,7 @@ def trainSqueezeNet(num_epochs, batch_size, learning_rate, train_loader):
                        .format(epoch+1, num_epochs, i+1, total_step, loss.item()))
 
     # Save the trained model after the training loop
-    torch.save(model.state_dict(), 'vgg16_cifar10_model.pth')
+    torch.save(model.state_dict(), 'basicCNN.pth')
 
     return loss_values
 
@@ -208,7 +186,7 @@ train_loader = torch.utils.data.DataLoader(dataset=train_dataset, batch_size=bat
 test_loader = torch.utils.data.DataLoader(dataset=test_dataset, batch_size=batch_size, shuffle=False)
 
 #loss_values = trainAlexNet(num_epochs, batch_size, learning_rate, train_loader)
-loss_values = trainSqueezeNet(num_epochs, batch_size, learning_rate, train_loader)
+loss_values = trainBasicCNN(num_epochs, batch_size, learning_rate, train_loader)
 
 # After training, plot the loss values
 plt.figure(figsize=(10, 5))
@@ -220,8 +198,10 @@ plt.legend()
 plt.show()
 
 # # Load the model for evaluation
-# model = AlexNet(num_classes=10)  # Re-create the model structure
-# model.load_state_dict(torch.load('alexnet_cifar10_model.pth'))
+# # model = AlexNet(num_classes=10)  # Re-create the model structure
+# model = SqueezeNet(num_classes=10)
+# # model.load_state_dict(torch.load('alexnet_cifar10_model.pth'))
+# model.load_state_dict(torch.load('vgg16_cifar10_model.pth'))
 # model.to(device)
 
 # # After testing the model, create confusion matrix
